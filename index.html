@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plaza Huanuni 3D</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { overflow: hidden; background: #87ceeb; width: 100%; height: 100%; }
+  canvas { display: block; }
+
+  #loading {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    background: rgba(0,0,0,0.6);
+    padding: 16px 30px;
+    border-radius: 12px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  #panel {
+    position: absolute;
+    top: 14px; left: 14px;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    background: rgba(0,0,0,0.50);
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 270px;
+    z-index: 5;
+  }
+  #panel strong { font-size: 14px; }
+  #instrucciones { color: #d4f0ff; font-size: 12px; }
+
+  #btnModo {
+    margin-top: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 8px;
+    background: #2e8b57;
+    color: #fff;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  #btnModo:hover { background: #246b44; }
+
+  /* Overlay de activación */
+  #overlayCaminar {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.48);
+    color: #fff;
+    font-family: Arial, sans-serif;
+    font-size: 20px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 8;
+  }
+  #overlayCaminar span {
+    background: rgba(0,0,0,0.55);
+    padding: 22px 32px;
+    border-radius: 14px;
+    line-height: 1.8;
+  }
+
+  /* Mira / crosshair */
+  #mira {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 18px; height: 18px;
+    display: none;
+    pointer-events: none;
+    z-index: 6;
+  }
+  #mira::before, #mira::after {
+    content: '';
+    position: absolute;
+    background: rgba(255,255,255,0.9);
+    border-radius: 2px;
+  }
+  #mira::before { width: 2px; height: 100%; top: 0; left: 8px; }
+  #mira::after  { width: 100%; height: 2px; top: 8px; left: 0; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <strong>Plaza Huanuni 3D</strong><br>
+  <span id="instrucciones">Modo vista libre: arrastra para rotar, scroll para zoom</span>
+  <button id="btnModo">🚶 Cambiar a modo caminar</button>
+</div>
+
+<div id="loading">Cargando modelos…</div>
+<div id="overlayCaminar">
+  <span>
+    Haz clic para activar el control<br><br>
+    <b>WASD</b> · Mover &nbsp;|&nbsp; <b>Mouse</b> · Girar cámara<br>
+    <b>Shift</b> · Correr &nbsp;|&nbsp; <b>ESC</b> · Volver a vista libre
+  </span>
+</div>
+<div id="mira"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { GLTFLoader }    from "three/addons/loaders/GLTFLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { Sky }           from "three/addons/objects/Sky.js";
+
+// ═══════════════════════════════════════════════════════════════
+//  ESCENA
+// ═══════════════════════════════════════════════════════════════
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x9fd3eb, 40, 120);
+
+// ═══════════════════════════════════════════════════════════════
+//  CÁMARA
+// ═══════════════════════════════════════════════════════════════
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2000);
+camera.position.set(9, 5, 12);
+
+// ═══════════════════════════════════════════════════════════════
+//  RENDERER
+// ═══════════════════════════════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+// ═══════════════════════════════════════════════════════════════
+//  ORBIT CONTROLS (modo vista libre)
+// ═══════════════════════════════════════════════════════════════
+const orbitControls = new OrbitControls(camera, renderer.domElement);
+orbitControls.target.set(0, 2, 0);
+orbitControls.enableDamping   = true;
+orbitControls.dampingFactor   = 0.06;
+orbitControls.minDistance     = 4;
+orbitControls.maxDistance     = 50;
+orbitControls.maxPolarAngle   = Math.PI / 2.05;
+orbitControls.update();
+
+// ═══════════════════════════════════════════════════════════════
+//  CIELO REALISTA
+// ═══════════════════════════════════════════════════════════════
+const sky = new Sky();
+sky.scale.setScalar(1500);
+scene.add(sky);
+const su = sky.material.uniforms;
+su.turbidity.value        = 3;
+su.rayleigh.value         = 1.4;
+su.mieCoefficient.value   = 0.0045;
+su.mieDirectionalG.value  = 0.85;
+const posSol = new THREE.Vector3();
+posSol.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - 52), THREE.MathUtils.degToRad(135));
+su.sunPosition.value.copy(posSol);
+
+// ═══════════════════════════════════════════════════════════════
+//  LUCES
+// ═══════════════════════════════════════════════════════════════
+scene.add(new THREE.HemisphereLight(0xbfe3ff, 0xb98a5a, 0.9));
+
+const sol = new THREE.DirectionalLight(0xfff3d6, 3.2);
+sol.position.set(15, 26, 10);
+sol.castShadow = true;
+sol.shadow.mapSize.set(2048, 2048);
+Object.assign(sol.shadow.camera, { near:1, far:80, left:-28, right:28, top:28, bottom:-28 });
+sol.shadow.bias = -0.0003;
+scene.add(sol);
+
+const relleno = new THREE.DirectionalLight(0xcfe8ff, 0.55);
+relleno.position.set(-10, 12, -8);
+scene.add(relleno);
+
+// ═══════════════════════════════════════════════════════════════
+//  FAROLAS
+// ═══════════════════════════════════════════════════════════════
+function crearFarola(x, z) {
+  const g = new THREE.Group();
+  const posteMat = new THREE.MeshPhongMaterial({ color: 0x2b2b2b, shininess: 40 });
+  const poste = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 3.6, 10), posteMat);
+  poste.position.y = 1.8; poste.castShadow = true; g.add(poste);
+
+  const brazo = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.06), posteMat);
+  brazo.position.set(0.25, 3.55, 0); g.add(brazo);
+
+  const farol = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 12, 12),
+    new THREE.MeshPhongMaterial({ color: 0xfff2cc, emissive: 0xfff0b8, emissiveIntensity: 0.9 })
+  );
+  farol.position.set(0.5, 3.45, 0); g.add(farol);
+
+  const luz = new THREE.PointLight(0xfff2cc, 6, 11, 2);
+  luz.position.copy(farol.position); g.add(luz);
+
+  g.position.set(x, 0, z);
+  scene.add(g);
+}
+[{x:-9,z:-9},{x:9,z:-9},{x:-9,z:9},{x:9,z:9}].forEach(p => crearFarola(p.x, p.z));
+
+// ═══════════════════════════════════════════════════════════════
+//  SUELO — adoquines procedurales
+// ═══════════════════════════════════════════════════════════════
+function texturaAdoquines() {
+  const cv = document.createElement("canvas"); cv.width = cv.height = 256;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#b7b4ad"; ctx.fillRect(0,0,256,256);
+  const t = 32;
+  for (let y = 0; y < 256; y += t) {
+    for (let x = 0; x < 256; x += t) {
+      const off = (y/t)%2===0 ? 0 : t/2;
+      ctx.strokeStyle = "rgba(110,108,102,0.6)"; ctx.lineWidth = 2;
+      ctx.strokeRect(x+off-t, y, t, t);
+      ctx.fillStyle = `rgba(0,0,0,${Math.random()*0.05})`;
+      ctx.fillRect(x, y, t, t);
+    }
+  }
+  const tx = new THREE.CanvasTexture(cv);
+  tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+  tx.repeat.set(18,18);
+  tx.colorSpace = THREE.SRGBColorSpace;
+  return tx;
+}
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshLambertMaterial({ map: texturaAdoquines() })
+);
+floor.rotation.x = -Math.PI/2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// ═══════════════════════════════════════════════════════════════
+//  MONTAÑAS DE FONDO
+// ═══════════════════════════════════════════════════════════════
+const colMont = [0x8d7a64, 0x9c8a72, 0x7c6a56];
+for (let i = 0; i < 26; i++) {
+  const ang = (i/26)*Math.PI*2;
+  const r   = 75 + Math.random()*18;
+  const h   = 14 + Math.random()*18;
+  const a   = 14 + Math.random()*10;
+  const m = new THREE.Mesh(
+    new THREE.ConeGeometry(a, h, 6),
+    new THREE.MeshLambertMaterial({ color: colMont[i%3] })
+  );
+  m.position.set(Math.cos(ang)*r, h/2-3, Math.sin(ang)*r);
+  m.rotation.y = Math.random()*Math.PI;
+  scene.add(m);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CARGA GLB
+// ═══════════════════════════════════════════════════════════════
+const loader = new GLTFLoader();
+const loadingEl = document.getElementById("loading");
+let pendientes = 4;
+function doneCarga() { if (--pendientes <= 0) loadingEl.style.display = "none"; }
+
+function cargarModelo(ruta, pos, escala, tipo) {
+  loader.load(ruta, gltf => {
+    const m = gltf.scene;
+    m.position.set(pos.x, pos.y, pos.z);
+    m.scale.setScalar(escala);
+    m.traverse(o => {
+      if (!o.isMesh) return;
+      o.castShadow = o.receiveShadow = true;
+      const col = o.material?.color   ?? new THREE.Color(0xffffff);
+      const map = o.material?.map     ?? null;
+      o.material = tipo === "phong"
+        ? new THREE.MeshPhongMaterial({ color: col, map, shininess: 70, specular: 0x444444 })
+        : new THREE.MeshLambertMaterial({ color: col, map });
+    });
+    scene.add(m);
+    doneCarga();
+  }, undefined, err => { console.error(ruta, err); doneCarga(); });
+}
+
+cargarModelo("./casco.glb",           { x:0, y:2,   z:0  }, 3, "phong");
+cargarModelo("./gradas%20plaza.glb",  { x:0, y:0,   z:-3 }, 1, "lambert");
+cargarModelo("./letras%20hununi.glb", { x:0, y:0.2, z:4  }, 1, "phong");
+
+// ═══════════════════════════════════════════════════════════════
+//  PERSONAJE — cápsula visual + GLB opcional
+// ═══════════════════════════════════════════════════════════════
+// Contenedor principal que rota con la dirección de movimiento
+const playerGroup = new THREE.Group();
+playerGroup.position.set(4, 0, 9);
+scene.add(playerGroup);
+
+// Cápsula de respaldo (siempre visible)
+const capsula = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.28, 1.1, 6, 12),
+  new THREE.MeshLambertMaterial({ color: 0x2244aa })
+);
+capsula.position.y = 0.83;
+capsula.castShadow = true;
+playerGroup.add(capsula);
+
+const cabeza = new THREE.Mesh(
+  new THREE.SphereGeometry(0.22, 12, 10),
+  new THREE.MeshLambertMaterial({ color: 0xf0c07a })
+);
+cabeza.position.y = 1.73;
+cabeza.castShadow = true;
+playerGroup.add(cabeza);
+
+// Mixer para animaciones del GLB del personaje
+let mixer     = null;
+let accWalk   = null;
+let accIdle   = null;
+let walkBlend = 0;  // 0 = reposo, 1 = caminando
+
+loader.load("./personaje.glb", gltf => {
+  const modelo = gltf.scene;
+  modelo.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  capsula.visible = false; // ocultar la cápsula si hay modelo real
+  cabeza.visible  = false;
+  playerGroup.add(modelo);
+
+  if (gltf.animations.length > 0) {
+    mixer   = new THREE.AnimationMixer(modelo);
+    const cW = gltf.animations.find(c => /walk|camin/i.test(c.name)) || gltf.animations[0];
+    const cI = gltf.animations.find(c => /idle|reposo|stand/i.test(c.name));
+    accWalk = mixer.clipAction(cW);
+    accWalk.play();
+    if (cI && cI !== cW) {
+      accIdle = mixer.clipAction(cI);
+      accIdle.play();
+      accIdle.setEffectiveWeight(1);
+      accWalk.setEffectiveWeight(0);
+    } else {
+      accWalk.setEffectiveWeight(1);
+      accWalk.paused = true;
+    }
+  }
+  doneCarga();
+}, undefined, err => { console.error("personaje.glb", err); doneCarga(); });
+
+function blendAnimacion(enMovimiento, corriendo, dt) {
+  if (!accWalk) return;
+  accWalk.timeScale = corriendo ? 1.7 : 1;
+  if (accIdle) {
+    const objetivo = enMovimiento ? 1 : 0;
+    walkBlend = THREE.MathUtils.lerp(walkBlend, objetivo, Math.min(dt * 8, 1));
+    accWalk.setEffectiveWeight(walkBlend);
+    accIdle.setEffectiveWeight(1 - walkBlend);
+  } else {
+    accWalk.paused = !enMovimiento;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SISTEMA DE CÁMARA TERCERA PERSONA — God of War style
+//  (sin PointerLockControls — control directo de yaw/pitch)
+// ═══════════════════════════════════════════════════════════════
+const tp = {
+  yaw:         0,       // ángulo horizontal (rad), inicializado al activar
+  pitch:       0.22,    // ángulo vertical   (rad)
+  pitchMin:   -0.10,
+  pitchMax:    0.90,
+  distance:    4.8,     // distancia al personaje
+  offsetRight: 0.6,     // desplazamiento lateral (hombro derecho)
+  offsetUp:    1.65,    // altura del punto de ancla (ojos del personaje)
+  sensitivity: 0.0022,  // sensibilidad del mouse
+  active:      false,
+  locked:      false,   // true cuando Pointer Lock está activo
+};
+
+// Acumuladores de movimiento del mouse
+let mdx = 0, mdy = 0;
+
+window.addEventListener("mousemove", e => {
+  if (!tp.active || !tp.locked) return;
+  mdx += e.movementX;
+  mdy += e.movementY;
+});
+
+// Pointer Lock API
+renderer.domElement.addEventListener("click", () => {
+  if (tp.active && !tp.locked) renderer.domElement.requestPointerLock();
+});
+document.addEventListener("pointerlockchange", () => {
+  tp.locked = document.pointerLockElement === renderer.domElement;
+  document.getElementById("mira").style.display = tp.locked ? "block" : "none";
+  if (!tp.locked && tp.active) overlayCaminar.style.display = "flex";
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  TECLAS
+// ═══════════════════════════════════════════════════════════════
+const keys = {};
+window.addEventListener("keydown", e => { keys[e.code] = true;  });
+window.addEventListener("keyup",   e => { keys[e.code] = false; });
+
+// ═══════════════════════════════════════════════════════════════
+//  UI — botón y overlay
+// ═══════════════════════════════════════════════════════════════
+const btnModo       = document.getElementById("btnModo");
+const instrucciones = document.getElementById("instrucciones");
+const overlayCaminar = document.getElementById("overlayCaminar");
+
+// Snapshot de la cámara libre para restaurarla
+let orbitSnap = {
+  pos:    camera.position.clone(),
+  target: orbitControls.target.clone()
+};
+
+btnModo.addEventListener("click", () => {
+  tp.active ? desactivarWalk() : activarWalk();
+});
+
+overlayCaminar.addEventListener("click", () => {
+  if (tp.active && !tp.locked) renderer.domElement.requestPointerLock();
+});
+
+// ESC — si no hay pointer lock y estamos en modo caminar, volver a vista libre
+window.addEventListener("keydown", e => {
+  if (e.code === "Escape" && tp.active && !tp.locked) {
+    setTimeout(() => { if (!tp.locked) desactivarWalk(); }, 150);
+  }
+});
+
+function activarWalk() {
+  // guardar snapshot orbit
+  orbitSnap.pos.copy(camera.position);
+  orbitSnap.target.copy(orbitControls.target);
+
+  // Sincronizar yaw con la dirección actual de la cámara Orbit
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  tp.yaw   = Math.atan2(dir.x, dir.z);
+  tp.pitch = 0.22;
+  tp.active = true;
+
+  orbitControls.enabled = false;
+  overlayCaminar.style.display = "none";
+
+  btnModo.textContent       = "🛰️ Volver a vista libre";
+  instrucciones.textContent = "Clic en la pantalla para activar · ESC = vista libre";
+}
+
+function desactivarWalk() {
+  tp.active = tp.locked = false;
+  if (document.pointerLockElement) document.exitPointerLock();
+
+  orbitControls.enabled = true;
+  overlayCaminar.style.display = "none";
+  document.getElementById("mira").style.display = "none";
+
+  // Restaurar cámara orbit apuntando al jugador
+  const pp = playerGroup.position;
+  camera.position.set(pp.x + 8, pp.y + 6, pp.z + 10);
+  orbitControls.target.set(pp.x, 1.5, pp.z);
+  orbitControls.update();
+
+  btnModo.textContent       = "🚶 Cambiar a modo caminar";
+  instrucciones.textContent = "Modo vista libre: arrastra para rotar, scroll para zoom";
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  VECTORES REUTILIZABLES (evita new cada frame)
+// ═══════════════════════════════════════════════════════════════
+const _fwd    = new THREE.Vector3();
+const _right  = new THREE.Vector3();
+const _up     = new THREE.Vector3(0, 1, 0);
+const _camPos = new THREE.Vector3();
+const _look   = new THREE.Vector3();
+
+// ═══════════════════════════════════════════════════════════════
+//  ACTUALIZAR MODO CAMINAR (se llama cada frame)
+// ═══════════════════════════════════════════════════════════════
+const LIMITE = 27;
+const RADIO_MONUMENTO = 3.4;
+
+function actualizarWalk(dt) {
+  // ── 1. Actualizar yaw/pitch desde el mouse ───────────────────
+  if (tp.locked) {
+    tp.yaw   -= mdx * tp.sensitivity;
+    tp.pitch -= mdy * tp.sensitivity;
+    tp.pitch  = THREE.MathUtils.clamp(tp.pitch, tp.pitchMin, tp.pitchMax);
+    mdx = mdy = 0;
+  }
+
+  // ── 2. Calcular dirección de avance/derecha en XZ ───────────
+  //   forward = dirección a la que "apunta" el eje de la cámara en el plano XZ
+  _fwd.set(Math.sin(tp.yaw), 0, Math.cos(tp.yaw)).normalize();
+  _right.crossVectors(_up, _fwd).normalize();   // apunta a la IZQUIERDA del personaje
+  // (CrossVectors up×forward = izquierda; negamos abajo para tener derecha)
+
+  // ── 3. Acumular input ─────────────────────────────────────────
+  let vx = 0, vz = 0;
+  if (keys["KeyW"]) { vx += _fwd.x;    vz += _fwd.z; }
+  if (keys["KeyS"]) { vx -= _fwd.x;    vz -= _fwd.z; }
+  if (keys["KeyA"]) { vx -= _right.x;  vz -= _right.z; }  // ← notar el signo
+  if (keys["KeyD"]) { vx += _right.x;  vz += _right.z; }
+
+  const corriendo    = keys["ShiftLeft"] || keys["ShiftRight"];
+  const enMovimiento = vx !== 0 || vz !== 0;
+  const speed        = corriendo ? 7.5 : 3.8;
+
+  if (enMovimiento) {
+    const inv = 1 / Math.sqrt(vx*vx + vz*vz);   // normalizar
+    playerGroup.position.x += vx * inv * speed * dt;
+    playerGroup.position.z += vz * inv * speed * dt;
+
+    // Rotar el personaje hacia la dirección de movimiento (interpolación suave)
+    const targetAngle = Math.atan2(vx, vz);
+    let diff = targetAngle - playerGroup.rotation.y;
+    while (diff >  Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    playerGroup.rotation.y += diff * Math.min(dt * 14, 1);
+  }
+
+  // ── 4. Colisiones ─────────────────────────────────────────────
+  // Bounding de la plaza
+  playerGroup.position.x = THREE.MathUtils.clamp(playerGroup.position.x, -LIMITE, LIMITE);
+  playerGroup.position.z = THREE.MathUtils.clamp(playerGroup.position.z, -LIMITE, LIMITE);
+  playerGroup.position.y = 0;
+
+  // Colisión circular con el monumento
+  const dx = playerGroup.position.x, dz = playerGroup.position.z;
+  const dist = Math.sqrt(dx*dx + dz*dz);
+  if (dist > 0 && dist < RADIO_MONUMENTO) {
+    const f = RADIO_MONUMENTO / dist;
+    playerGroup.position.x *= f;
+    playerGroup.position.z *= f;
+  }
+
+  // ── 5. Animación del personaje ────────────────────────────────
+  blendAnimacion(enMovimiento, corriendo, dt);
+
+  // ── 6. Posición de la cámara (God of War style) ───────────────
+  //
+  //  Punto de ancla = hombro derecho del personaje
+  //  La cámara se aleja desde ese punto en la dirección (yaw, pitch)
+  //
+  const px = playerGroup.position.x;
+  const py = playerGroup.position.y;
+  const pz = playerGroup.position.z;
+
+  // Vector derecha relativo al yaw de la cámara (NO al personaje)
+  const rightX =  Math.cos(tp.yaw);   // perpendicular al forward en XZ
+  const rightZ = -Math.sin(tp.yaw);
+
+  // Ancla = hombro derecho del personaje a altura de los ojos
+  const ancX = px + rightX * tp.offsetRight;
+  const ancY = py + tp.offsetUp;
+  const ancZ = pz + rightZ * tp.offsetRight;
+
+  // Posición de la cámara usando coordenadas esféricas desde el ancla
+  const cosP = Math.cos(tp.pitch);
+  const sinP = Math.sin(tp.pitch);
+  const sinY = Math.sin(tp.yaw);
+  const cosY = Math.cos(tp.yaw);
+
+  _camPos.set(
+    ancX + sinY * cosP * tp.distance,
+    ancY + sinP * tp.distance,
+    ancZ + cosY * cosP * tp.distance
+  );
+
+  // Punto al que mira la cámara: ligeramente por delante del personaje
+  _look.set(
+    ancX - sinY * 1.8,
+    ancY - sinP * 0.6,
+    ancZ - cosY * 1.8
+  );
+
+  camera.position.copy(_camPos);
+  camera.lookAt(_look);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  LOOP
+// ═══════════════════════════════════════════════════════════════
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);  // cap a 50 ms
+
+  if (mixer) mixer.update(dt);
+
+  if (tp.active) {
+    actualizarWalk(dt);
+  } else {
+    orbitControls.update();
+    // giro decorativo del personaje en vista libre
+    playerGroup.rotation.y += dt * 0.15;
+  }
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ═══════════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════════
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
